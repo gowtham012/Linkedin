@@ -1,0 +1,93 @@
+{
+  "name": "LinkedIn AI Auto-Poster",
+  "description": "Automatically fetches AI news, curates top stories, writes LinkedIn posts with personal commentary, verifies facts, and posts to LinkedIn.",
+  "version": "1.0.0",
+
+  "nodes": [
+    {
+      "id": "trigger",
+      "type": "webhook",
+      "name": "Daily Trigger",
+      "description": "Triggered by cron job at 10am daily"
+    },
+    {
+      "id": "fetch_news",
+      "type": "tool",
+      "name": "Fetch AI News",
+      "tool": "fetch_ai_news",
+      "inputs": {
+        "hours_back": 48
+      }
+    },
+    {
+      "id": "curate_news",
+      "type": "agent",
+      "name": "News Curator",
+      "model": "gpt-4o",
+      "system_prompt": "You are an AI News Curator for a developer-focused LinkedIn account. Select the TOP 3-5 most interesting and newsworthy items for developers. Prioritize: new product launches, API releases, technical breakthroughs, developer tools. Avoid: opinion pieces, hiring news, vague articles. Output the selected articles with URLs exactly as provided.",
+      "inputs": ["fetch_news.articles"]
+    },
+    {
+      "id": "write_post",
+      "type": "agent",
+      "name": "Content Writer",
+      "model": "gpt-4o",
+      "system_prompt": "You are a LinkedIn Content Writer for a developer who loves AI. Write posts with: enthusiastic 'new in town' energy, practical project ideas, technical details, and personal thoughts (💭 My thoughts:). Format: bold titles, content explanation, your thoughts for each item, engagement question, References section with all URLs at bottom, hashtags. ONLY use facts from provided sources. Never invent information.",
+      "inputs": ["curate_news.output"]
+    },
+    {
+      "id": "verify_facts",
+      "type": "agent",
+      "name": "Fact Verifier",
+      "model": "gpt-4o",
+      "system_prompt": "You are a Fact Verification Agent. Verify every claim in the draft post against the original sources. Check: feature claims, numbers/benchmarks, release status, URLs match content. Output: {verified: true/false, confidence: 0-100, issues: []}. Mark FAILED if any claim is not supported by sources.",
+      "inputs": ["write_post.output", "fetch_news.articles"]
+    },
+    {
+      "id": "quality_gate",
+      "type": "condition",
+      "name": "Quality Gate",
+      "condition": "verify_facts.verified == true AND verify_facts.confidence >= 85",
+      "true_branch": "post_to_linkedin",
+      "false_branch": "notify_failure"
+    },
+    {
+      "id": "post_to_linkedin",
+      "type": "tool",
+      "name": "Post to LinkedIn",
+      "tool": "post_to_linkedin",
+      "inputs": {
+        "content": "write_post.output"
+      }
+    },
+    {
+      "id": "notify_failure",
+      "type": "output",
+      "name": "Manual Review Required",
+      "description": "Send draft for manual review when verification fails"
+    }
+  ],
+
+  "edges": [
+    {"from": "trigger", "to": "fetch_news"},
+    {"from": "fetch_news", "to": "curate_news"},
+    {"from": "curate_news", "to": "write_post"},
+    {"from": "write_post", "to": "verify_facts"},
+    {"from": "verify_facts", "to": "quality_gate"}
+  ],
+
+  "tools": [
+    {
+      "name": "fetch_ai_news",
+      "type": "http",
+      "endpoint": "${TOOLS_SERVER_URL}/tools/fetch_ai_news",
+      "method": "POST"
+    },
+    {
+      "name": "post_to_linkedin",
+      "type": "http",
+      "endpoint": "${TOOLS_SERVER_URL}/tools/post_to_linkedin",
+      "method": "POST"
+    }
+  ]
+}
