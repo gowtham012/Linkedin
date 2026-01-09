@@ -11,25 +11,49 @@ on:
 jobs:
   post-to-linkedin:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Check secrets
+        run: |
+          if [ -z "${{ secrets.RENDER_API_URL }}" ]; then
+            echo "ERROR: RENDER_API_URL secret is not set!"
+            echo "Please add it in Settings > Secrets > Actions"
+            exit 1
+          fi
+          echo "Secrets configured correctly"
+
       - name: Generate and Post to LinkedIn
         run: |
           echo "Triggering LinkedIn post generation..."
+          echo "API URL: ${{ secrets.RENDER_API_URL }}"
 
+          # Call the API with extended timeout (3 minutes)
           response=$(curl -s -X POST "${{ secrets.RENDER_API_URL }}/tools/full_workflow" \
             -H "Content-Type: application/json" \
-            -d '{"hours_back": 48, "auto_post": true}')
+            -d '{"hours_back": 48, "auto_post": true}' \
+            --max-time 180 \
+            --retry 2 \
+            --retry-delay 10)
 
           echo "Response: $response"
 
+          # Check if response is empty
+          if [ -z "$response" ]; then
+            echo "ERROR: Empty response from API (timeout or connection error)"
+            exit 1
+          fi
+
           # Check if successful
-          success=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('success', False))")
+          success=$(echo "$response" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('success', False))" 2>/dev/null || echo "ParseError")
 
           if [ "$success" = "True" ]; then
             echo "Successfully posted to LinkedIn!"
+            # Extract post preview
+            echo "$response" | python3 -c "import sys, json; data=json.load(sys.stdin); print('Post preview:', data.get('post', '')[:200] + '...')" 2>/dev/null || true
           else
-            echo "Failed to post. Response: $response"
+            echo "Failed to post."
+            echo "Full response: $response"
             exit 1
           fi
 
