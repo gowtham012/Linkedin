@@ -51,7 +51,12 @@ def call_openai(prompt: str, system_message: str = None) -> str:
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""
-    return jsonify({"status": "healthy"})
+    return jsonify({
+        "status": "healthy",
+        "openai_key_set": bool(os.getenv("OPENAI_API_KEY")),
+        "gnews_key_set": bool(os.getenv("GNEWS_API_KEY")),
+        "linkedin_token_set": bool(os.getenv("LINKEDIN_ACCESS_TOKEN"))
+    })
 
 
 @app.route('/tools/fetch_ai_news', methods=['POST'])
@@ -95,9 +100,11 @@ def generate_post():
         hours_back = data.get('hours_back', 48)
 
         # Step 1: Fetch all articles
+        print("[generate_post] Step 1: Fetching articles...")
         rss_articles = fetch_rss_feeds(hours_back=hours_back)
         gnews_articles = fetch_gnews()
         all_articles = rss_articles + gnews_articles
+        print(f"[generate_post] Found {len(all_articles)} articles")
 
         if not all_articles:
             return jsonify({"success": False, "error": "No articles found"})
@@ -112,10 +119,13 @@ def generate_post():
             articles_text += f"Summary: {article['summary'][:800]}\n\n"
 
         # Step 2: Curate best articles
+        print("[generate_post] Step 2: Calling OpenAI for curation...")
         curator_prompt = NEWS_CURATOR_PROMPT.format(articles=articles_text)
         curated = call_openai(curator_prompt, "Select the most interesting AI news for developers.")
+        print("[generate_post] Curation complete")
 
         # Step 3: Fetch full content from curated URLs
+        print("[generate_post] Step 3: Fetching full article content...")
         import re
         urls = re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', curated)[:4]
 
@@ -123,10 +133,13 @@ def generate_post():
         for url in urls:
             article = fetch_article_content(url.rstrip(')'), 2000)
             full_content += f"\n=== {article['title']} ===\n{article['content'][:2000]}\n"
+        print(f"[generate_post] Fetched {len(urls)} articles")
 
         # Step 4: Generate human-like post
+        print("[generate_post] Step 4: Calling OpenAI to generate post...")
         writer_prompt = CONTENT_WRITER_PROMPT.format(curated_articles=full_content)
         post_content = call_openai(writer_prompt, "Write like a real human, not an AI.")
+        print("[generate_post] Post generated successfully")
 
         return jsonify({
             "success": True,
@@ -135,6 +148,9 @@ def generate_post():
         })
 
     except Exception as e:
+        import traceback
+        print(f"[generate_post] ERROR: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({"success": False, "error": str(e)}), 500
 
 
