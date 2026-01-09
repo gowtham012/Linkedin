@@ -1,1 +1,1 @@
-web: gunicorn agent_builder.tools_server:app --bind 0.0.0.0:$PORT
+web: gunicorn agent_builder.tools_server:app --bind 0.0.0.0:$PORT --timeout 180 --workers 1
