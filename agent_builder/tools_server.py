@@ -185,23 +185,56 @@ def full_workflow():
     Complete workflow: Generate post and optionally post to LinkedIn.
     """
     try:
+        import re
         data = request.json or {}
         hours_back = data.get('hours_back', 48)
         auto_post = data.get('auto_post', False)
 
-        # Generate post
-        from flask import current_app
-        with current_app.test_request_context(json={'hours_back': hours_back}):
-            gen_response = generate_post()
-            gen_data = gen_response.get_json()
+        print("[full_workflow] Starting workflow...")
 
-        if not gen_data.get('success'):
-            return jsonify(gen_data)
+        # Step 1: Fetch articles
+        print("[full_workflow] Fetching articles...")
+        rss_articles = fetch_rss_feeds(hours_back=hours_back)
+        gnews_articles = fetch_gnews()
+        all_articles = rss_articles + gnews_articles
 
-        post_content = gen_data['post']
+        if not all_articles:
+            return jsonify({"success": False, "error": "No articles found"})
+
+        print(f"[full_workflow] Found {len(all_articles)} articles")
+
+        # Format for curation
+        articles_text = f"Found {len(all_articles)} articles:\n\n"
+        for i, article in enumerate(all_articles[:15], 1):
+            articles_text += f"--- Article {i} ---\n"
+            articles_text += f"Source: {article['source']}\n"
+            articles_text += f"Title: {article['title']}\n"
+            articles_text += f"URL: {article['url']}\n"
+            articles_text += f"Summary: {article['summary'][:500]}\n\n"
+
+        # Step 2: Curate
+        print("[full_workflow] Curating articles...")
+        curator_prompt = NEWS_CURATOR_PROMPT.format(articles=articles_text)
+        curated = call_openai(curator_prompt, "Select the most interesting AI news for developers.")
+
+        # Step 3: Get URLs and fetch content
+        print("[full_workflow] Fetching full content...")
+        urls = re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', curated)[:3]
+        full_content = curated + "\n\nFULL ARTICLE CONTENT:\n"
+        for url in urls:
+            article = fetch_article_content(url.rstrip(')'), 1500)
+            full_content += f"\n=== {article['title']} ===\n{article['content'][:1500]}\n"
+
+        # Step 4: Generate post
+        print("[full_workflow] Generating post...")
+        writer_prompt = CONTENT_WRITER_PROMPT.format(curated_articles=full_content)
+        post_content = call_openai(writer_prompt, "Write like a real human, not an AI.")
+
+        print("[full_workflow] Post generated successfully")
 
         # Auto-post if requested
         if auto_post:
+            print("[full_workflow] Posting to LinkedIn...")
             validation = validate_linkedin_token()
             if not validation.get('valid'):
                 return jsonify({
