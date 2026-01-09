@@ -1,0 +1,39 @@
+name: Daily LinkedIn AI Post
+
+on:
+  # Run daily at 10am IST (4:30 UTC)
+  schedule:
+    - cron: '30 4 * * *'
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  post-to-linkedin:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate and Post to LinkedIn
+        run: |
+          echo "Triggering LinkedIn post generation..."
+
+          response=$(curl -s -X POST "${{ secrets.RENDER_API_URL }}/tools/full_workflow" \
+            -H "Content-Type: application/json" \
+            -d '{"hours_back": 48, "auto_post": true}')
+
+          echo "Response: $response"
+
+          # Check if successful
+          success=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('success', False))")
+
+          if [ "$success" = "True" ]; then
+            echo "Successfully posted to LinkedIn!"
+          else
+            echo "Failed to post. Response: $response"
+            exit 1
+          fi
+
+      - name: Log Result
+        if: always()
+        run: |
+          echo "Workflow completed at $(date)"
